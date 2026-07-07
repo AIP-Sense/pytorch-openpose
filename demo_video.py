@@ -45,10 +45,12 @@ hand_estimation = Hand('model/hand_pose_model.pth')
 
 def process_frame(frame, body=True, hands=True):
     canvas = copy.deepcopy(frame)
+    candidate = None
+    subset = None
     if body:
         candidate, subset = body_estimation(frame)
         canvas = util.draw_bodypose(canvas, candidate, subset)
-    if hands:
+    if hands and candidate is not None and subset is not None:
         hands_list = util.handDetect(candidate, subset, frame)
         all_hand_peaks = []
         for x, y, w, is_left in hands_list:
@@ -87,17 +89,35 @@ postfix = info["format"]["format_name"].split(",")[0]
 output_file = ".".join(video_file.split(".")[:-1])+".processed." + postfix
 
 
+def ensure_even_frame(frame):
+    height, width = frame.shape[:2]
+    pad_bottom = height % 2
+    pad_right = width % 2
+    if pad_bottom == 0 and pad_right == 0:
+        return frame
+    return cv2.copyMakeBorder(
+        frame,
+        0,
+        pad_bottom,
+        0,
+        pad_right,
+        cv2.BORDER_REPLICATE,
+    )
+
+
 class Writer():
     def __init__(self, output_file, input_fps, input_framesize, input_pix_fmt,
                  input_vcodec):
         if os.path.exists(output_file):
             os.remove(output_file)
+        height, width = input_framesize
+        self.framesize = (height + height % 2, width + width % 2)
         self.ff_proc = (
             ffmpeg
             .input('pipe:',
                    format='rawvideo',
                    pix_fmt="bgr24",
-                   s='%sx%s'%(input_framesize[1],input_framesize[0]),
+                   s='%sx%s'%(self.framesize[1], self.framesize[0]),
                    r=input_fps)
             .output(output_file, pix_fmt=input_pix_fmt, vcodec=input_vcodec)
             .overwrite_output()
@@ -105,11 +125,23 @@ class Writer():
         )
 
     def __call__(self, frame):
+        frame = ensure_even_frame(frame)
+        if frame.shape[:2] != self.framesize:
+            raise ValueError(
+                "Frame size changed from %sx%s to %sx%s" % (
+                    self.framesize[1],
+                    self.framesize[0],
+                    frame.shape[1],
+                    frame.shape[0],
+                )
+            )
         self.ff_proc.stdin.write(frame.tobytes())
 
     def close(self):
         self.ff_proc.stdin.close()
-        self.ff_proc.wait()
+        return_code = self.ff_proc.wait()
+        if return_code != 0:
+            raise RuntimeError("ffmpeg exited with status %s" % return_code)
 
 
 writer = None

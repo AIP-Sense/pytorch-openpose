@@ -3,7 +3,7 @@ import json
 import numpy as np
 import math
 import time
-from scipy.ndimage.filters import gaussian_filter
+from scipy.ndimage import gaussian_filter
 import matplotlib.pyplot as plt
 import matplotlib
 import torch
@@ -15,11 +15,16 @@ from src import util
 class Hand(object):
     def __init__(self, model_path):
         self.model = handpose_model()
-        if torch.cuda.is_available():
-            self.model = self.model.cuda()
-        model_dict = util.transfer(self.model, torch.load(model_path))
+        self.device = util.get_torch_device()
+        model_dict = util.transfer(self.model, torch.load(model_path, map_location='cpu'))
         self.model.load_state_dict(model_dict)
+        self.model = self.model.to(self.device)
         self.model.eval()
+
+    def _fallback_to_cpu(self, error):
+        print(f"MPS inference failed, falling back to CPU: {error}")
+        self.device = torch.device('cpu')
+        self.model = self.model.to(self.device)
 
     def __call__(self, oriImg):
         scale_search = [0.5, 1.0, 1.5, 2.0]
@@ -39,12 +44,16 @@ class Hand(object):
             im = np.transpose(np.float32(imageToTest_padded[:, :, :, np.newaxis]), (3, 2, 0, 1)) / 256 - 0.5
             im = np.ascontiguousarray(im)
 
-            data = torch.from_numpy(im).float()
-            if torch.cuda.is_available():
-                data = data.cuda()
+            data = torch.from_numpy(im).float().to(self.device)
             # data = data.permute([2, 0, 1]).unsqueeze(0).float()
             with torch.no_grad():
-                output = self.model(data).cpu().numpy()
+                try:
+                    output = self.model(data).cpu().numpy()
+                except RuntimeError as error:
+                    if self.device.type != 'mps':
+                        raise
+                    self._fallback_to_cpu(error)
+                    output = self.model(data.cpu()).cpu().numpy()
                 # output = self.model(data).numpy()q
 
             # extract outputs, resize, and remove padding

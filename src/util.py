@@ -2,11 +2,23 @@ import numpy as np
 import math
 import cv2
 import matplotlib
+import os
+import torch
 from matplotlib.backends.backend_agg import FigureCanvasAgg as FigureCanvas
 from matplotlib.figure import Figure
-import numpy as np
 import matplotlib.pyplot as plt
-import cv2
+
+
+def get_torch_device():
+    requested_device = os.environ.get('OPENPOSE_DEVICE')
+    if requested_device:
+        return torch.device(requested_device)
+
+    if hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        return torch.device('mps')
+    if torch.cuda.is_available():
+        return torch.device('cuda')
+    return torch.device('cpu')
 
 
 def padRightDownCorner(img, stride, padValue):
@@ -77,6 +89,9 @@ def draw_bodypose(canvas, candidate, subset):
 def draw_handpose(canvas, all_hand_peaks, show_number=False):
     edges = [[0, 1], [1, 2], [2, 3], [3, 4], [0, 5], [5, 6], [6, 7], [7, 8], [0, 9], [9, 10], \
              [10, 11], [11, 12], [0, 13], [13, 14], [14, 15], [15, 16], [0, 17], [17, 18], [18, 19], [19, 20]]
+    if isinstance(all_hand_peaks, np.ndarray) and all_hand_peaks.ndim == 2:
+        all_hand_peaks = [all_hand_peaks]
+
     fig = Figure(figsize=plt.figaspect(canvas))
 
     fig.subplots_adjust(0, 0, 1, 1)
@@ -101,7 +116,7 @@ def draw_handpose(canvas, all_hand_peaks, show_number=False):
             if show_number:
                 ax.text(x, y, str(i))
     bg.draw()
-    canvas = np.fromstring(bg.tostring_rgb(), dtype='uint8').reshape(int(height), int(width), 3)
+    canvas = np.asarray(bg.buffer_rgba())[:, :, :3].copy()
     return canvas
 
 # image drawed by opencv is not good.

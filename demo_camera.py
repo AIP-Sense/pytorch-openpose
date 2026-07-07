@@ -12,13 +12,15 @@ from src.hand import Hand
 body_estimation = Body('model/body_pose_model.pth')
 hand_estimation = Hand('model/hand_pose_model.pth')
 
-print(f"Torch device: {torch.cuda.get_device_name()}")
+print(f"Torch device: {body_estimation.device}")
 
 cap = cv2.VideoCapture(0)
 cap.set(3, 640)
 cap.set(4, 480)
 while True:
     ret, oriImg = cap.read()
+    if not ret:
+        break
     candidate, subset = body_estimation(oriImg)
     canvas = copy.deepcopy(oriImg)
     canvas = util.draw_bodypose(canvas, candidate, subset)
@@ -41,4 +43,3 @@ while True:
 
 cap.release()
 cv2.destroyAllWindows()
-
